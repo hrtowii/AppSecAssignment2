@@ -11,8 +11,8 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Assignment2.Migrations
 {
     [DbContext(typeof(MyDbContext))]
-    [Migration("20250213221453_asd")]
-    partial class asd
+    [Migration("20250214033322_initial")]
+    partial class initial
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -100,7 +100,6 @@ namespace Assignment2.Migrations
                         .HasColumnType("longtext");
 
                     b.Property<string>("ResetToken")
-                        .IsRequired()
                         .HasColumnType("longtext");
 
                     b.Property<DateTime?>("ResetTokenExpiry")

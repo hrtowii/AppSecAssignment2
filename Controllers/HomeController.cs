@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Mvc;
 using Assignment2.Models;
@@ -54,5 +55,31 @@ public class HomeController : Controller
         };
 
         return View(viewModel);
+    }
+    
+    public IActionResult Error(int? statusCode = null)
+    {
+        var errorModel = new ErrorViewModel
+        {
+            RequestId = Activity.Current?.Id ?? HttpContext.TraceIdentifier,
+            StatusCode = statusCode
+        };
+
+        if (statusCode.HasValue)
+        {
+            switch (statusCode.Value)
+            {
+                case 404:
+                    errorModel.Details = "Page not found (404).";
+                    break;
+                case 403:
+                    errorModel.Details = "You are not authorized to view this page (403).";
+                    break;
+                default:
+                    errorModel.Details = "An unexpected error occurred.";
+                    break;
+            }
+        }
+        return View("Error", errorModel);
     }
 }

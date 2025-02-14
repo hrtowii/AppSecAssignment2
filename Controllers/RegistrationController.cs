@@ -167,7 +167,8 @@ public async Task<IActionResult> Register(RegistrationViewModel model)
                 Salt = salt,
                 PhotoPath = registrationData.PhotoPath,
                 AboutMe = registrationData.AboutMe,
-                CreatedDate = DateTime.UtcNow
+                CreatedDate = DateTime.UtcNow,
+                LastPasswordReset = DateTime.UtcNow
             };
 
             // try
@@ -222,9 +223,9 @@ public async Task<IActionResult> Login(string email, string password)
     if (!isValid)
     {
         user.FailedLoginAttempts++;
-        if (user.FailedLoginAttempts >= 5)
+        if (user.FailedLoginAttempts >= 3)
         {
-            user.LockoutEnd = DateTime.UtcNow.AddMinutes(30);
+            user.LockoutEnd = DateTime.UtcNow.AddMinutes(1);
         }
         await _dbContext.SaveChangesAsync();
         ModelState.AddModelError("", "Invalid credentials.");
@@ -378,31 +379,42 @@ public async Task<IActionResult> Login(string email, string password)
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> ResetPassword(ResetPasswordViewModel model)
         {
-            Console.WriteLine(ModelState);
             if (!ModelState.IsValid)
             {
-                Console.WriteLine(("invalid model"));
                 return View(model);
             }
-
             var user = await _dbContext.Users
-                .FirstOrDefaultAsync(u => 
-                    u.ResetToken == model.Token && 
+                .FirstOrDefaultAsync(u =>
+                    u.ResetToken == model.Token &&
                     u.ResetTokenExpiry > DateTime.UtcNow);
-            Console.WriteLine("User found: ${user}");
             if (user == null)
             {
-                Console.WriteLine("invalid or expired token ???");
                 ModelState.AddModelError("", "Invalid or expired token.");
-                return View();
+                return View(model);
             }
-
-            // Update password
+    
+            // Enforce minimum password age (for example, 5 minutes)
+            if (user.LastPasswordReset.HasValue &&
+                DateTime.UtcNow < user.LastPasswordReset.Value.AddMinutes(5))
+            {
+                ModelState.AddModelError("", "Password was recently changed. Please wait a few minutes before resetting again.");
+                return View(model);
+            }
+    
+            // Prevent password reuse: the new password must not match the current one.
+            if (_encryptionService.VerifyPassword(model.NewPassword, user.PasswordHash, user.Salt))
+            {
+                ModelState.AddModelError("", "The new password must be different from the current password.");
+                return View(model);
+            }
+    
+            // Compute and update the new password hash, update LastPasswordReset, and clear token fields.
             user.PasswordHash = _encryptionService.HashPassword(model.NewPassword, out string salt);
             user.Salt = salt;
             user.ResetToken = null;
             user.ResetTokenExpiry = null;
-
+            user.LastPasswordReset = DateTime.UtcNow;
+    
             try
             {
                 await _dbContext.SaveChangesAsync();
@@ -413,7 +425,6 @@ public async Task<IActionResult> Login(string email, string password)
                 ModelState.AddModelError("", "Error resetting password.");
                 return View(model);
             }
-
             return RedirectToAction("ResetPasswordConfirmation");
         }
 

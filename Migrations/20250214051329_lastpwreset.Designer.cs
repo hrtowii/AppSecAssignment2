@@ -11,8 +11,8 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Assignment2.Migrations
 {
     [DbContext(typeof(MyDbContext))]
-    [Migration("20250213224650_nullable")]
-    partial class nullable
+    [Migration("20250214051329_lastpwreset")]
+    partial class lastpwreset
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -83,6 +83,9 @@ namespace Assignment2.Migrations
                     b.Property<string>("Gender")
                         .IsRequired()
                         .HasColumnType("longtext");
+
+                    b.Property<DateTime?>("LastPasswordReset")
+                        .HasColumnType("datetime(6)");
 
                     b.Property<DateTime?>("LockoutEnd")
                         .HasColumnType("datetime(6)");

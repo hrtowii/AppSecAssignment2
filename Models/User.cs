@@ -18,5 +18,6 @@ namespace Assignment2.Models
         public DateTime? LockoutEnd { get; set; } // Add this
         public string? ResetToken { get; set; }
         public DateTime? ResetTokenExpiry { get; set; }
+        public DateTime? LastPasswordReset { get; set; }
     }
 }

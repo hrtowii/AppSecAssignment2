@@ -81,6 +81,9 @@ namespace Assignment2.Migrations
                         .IsRequired()
                         .HasColumnType("longtext");
 
+                    b.Property<DateTime?>("LastPasswordReset")
+                        .HasColumnType("datetime(6)");
+
                     b.Property<DateTime?>("LockoutEnd")
                         .HasColumnType("datetime(6)");
 

@@ -1,8 +1,10 @@
-namespace Assignment2.Models;
-
-public class ErrorViewModel
+namespace Assignment2.Models
 {
-    public string? RequestId { get; set; }
-    public int? StatusCode { get; set; }
-    public bool ShowRequestId => !string.IsNullOrEmpty(RequestId);
+    public class ErrorViewModel
+    {
+        public string? RequestId { get; set; }
+        public int? StatusCode { get; set; }
+        public string? Details { get; set; }
+        public bool ShowRequestId => !string.IsNullOrEmpty(RequestId);
+    }
 }
