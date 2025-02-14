@@ -14,8 +14,8 @@ namespace Assignment2.Models
         [Required(ErrorMessage = "Gender is required")]
         public string Gender { get; set; }
         
-        [Required(ErrorMessage = "Mobile No is required")]
-        [Phone(ErrorMessage = "Invalid mobile number")]
+        [Phone(ErrorMessage = "Invalid mobile number format.")]
+        [RegularExpression(@"^\+?[1-9]\d{1,14}$", ErrorMessage = "Invalid international phone number.")]
         public string MobileNo { get; set; }
         
         [Required(ErrorMessage = "Delivery Address is required")]
@@ -27,6 +27,8 @@ namespace Assignment2.Models
         
         [Required(ErrorMessage = "Password is required")]
         [DataType(DataType.Password)]
+        [RegularExpression(@"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^\da-zA-Z]).{12,}$", 
+            ErrorMessage = "Password must be at least 12 characters long and include uppercase, lowercase, number, and special character.")]
         public string Password { get; set; }
         
         [Required(ErrorMessage = "Confirm Password is required")]
@@ -37,8 +39,9 @@ namespace Assignment2.Models
         [Required(ErrorMessage = "Please upload your photo (.JPG only)")]
         public IFormFile Photo { get; set; }
         
-        public string AboutMe { get; set; }
-        
+        [Required(ErrorMessage = "About Me is required")]
+        [StringLength(500, ErrorMessage = "About Me cannot exceed 500 characters.")]
+        public string AboutMe { get; set; }        
         [Required(ErrorMessage = "Captcha is required")]
         public string Captcha { get; set; } // For anti-bot validation
     }

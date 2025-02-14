@@ -1,8 +1,42 @@
-﻿@{
-    ViewData["Title"] = "Home Page";
+﻿@model Assignment2.Models.UserViewModel
+@{
+    ViewData["Title"] = "User Profile";
 }
 
-<div class="text-center">
-    <h1 class="display-4">Welcome</h1>
-    <p>Learn about <a href="https://learn.microsoft.com/aspnet/core">building Web apps with ASP.NET Core</a>.</p>
+<div class="container">
+    <h1 class="display-4">Welcome, @Model.FullName!</h1>
+    
+    <div class="row mt-5">
+        <div class="col-md-4">
+            <div class="card">
+                @if (!string.IsNullOrEmpty(Model.PhotoPath))
+                {
+                    <img src="@Model.PhotoPath" class="card-img-top" alt="Profile Photo">
+                }
+                <div class="card-body">
+                    <h5 class="card-title">@Model.FullName</h5>
+                    <p class="card-text">@Model.AboutMe</p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-8">
+            <dl class="row">
+                <dt class="col-sm-3">Email</dt>
+                <dd class="col-sm-9">@Model.Email</dd>
+
+                <dt class="col-sm-3">Credit Card</dt>
+                <dd class="col-sm-9">@Model.CreditCardNo</dd>
+
+                <dt class="col-sm-3">Mobile Number</dt>
+                <dd class="col-sm-9">@Model.MobileNo</dd>
+
+                <dt class="col-sm-3">Delivery Address</dt>
+                <dd class="col-sm-9">@Model.DeliveryAddress</dd>
+
+                <dt class="col-sm-3">Gender</dt>
+                <dd class="col-sm-9">@Model.Gender</dd>
+            </dl>
+        </div>
+    </div>
 </div>

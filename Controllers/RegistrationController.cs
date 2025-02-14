@@ -1,17 +1,30 @@
+using System.Configuration;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Mvc;
 using Assignment2.Models;
 using Assignment2.Services;
-using System.IO;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.EntityFrameworkCore;
+using Newtonsoft.Json;
 
 namespace Assignment2.Controllers
 {
     public class RegistrationController : Controller
     {
         private readonly MyDbContext _dbContext;
+        private readonly EmailService _emailService;
+        private readonly EncryptionService _encryptionService;
+        private readonly IConfiguration _configuration;
+        private readonly RedisService _redisService;
 
-        public RegistrationController(MyDbContext dbContext)
+        public RegistrationController(MyDbContext dbContext, EmailService emailService, EncryptionService encryptionService, IConfiguration configuration, RedisService redisService)
         {
             _dbContext = dbContext;
+            _emailService = emailService;
+            _encryptionService = encryptionService;
+            _configuration = configuration;
+            _redisService = redisService;
         }
 
         // GET: /register (via custom route)
@@ -20,89 +33,159 @@ namespace Assignment2.Controllers
             return View();
         }
 
-        // POST: /register
-        [HttpPost]
-        [ValidateAntiForgeryToken] 
-        public IActionResult Register(RegistrationViewModel model)
+[HttpPost]
+[ValidateAntiForgeryToken]
+public async Task<IActionResult> Register(RegistrationViewModel model)
+{
+    if (!ModelState.IsValid)
+    {
+        return View(model);
+    }
+
+    var isCaptchaValid = await IsCaptchaValid(model.Captcha);
+    if (!isCaptchaValid)
+    {
+        ModelState.AddModelError("Captcha", "Captcha validation failed.");
+        return View(model);
+    }
+
+    if (_dbContext.Users.Any(u => u.Email.ToLower() == model.Email.Trim().ToLower()))
+    {
+        ModelState.AddModelError("Email", "Email already exists.");
+        return View(model);
+    }
+
+    // Process photo upload here
+    string photoPath = null;
+    if (model.Photo != null)
+    {
+        if (model.Photo.ContentType.ToLower() != "image/jpeg" && 
+            model.Photo.ContentType.ToLower() != "image/jpg")
         {
-            if (!ModelState.IsValid)
+            ModelState.AddModelError("Photo", "Invalid photo format. Only JPG allowed.");
+            return View(model);
+        }
+
+        string imagesPath = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "images");
+        if (!Directory.Exists(imagesPath))
+        {
+            Directory.CreateDirectory(imagesPath);
+        }
+
+        string fileName = Path.GetFileName(model.Photo.FileName);
+        string filePath = Path.Combine(imagesPath, fileName);
+        using (var stream = new FileStream(filePath, FileMode.Create))
+        {
+            await model.Photo.CopyToAsync(stream);
+        }
+        photoPath = "/images/" + fileName;
+    }
+    else
+    {
+        ModelState.AddModelError("Photo", "Photo is required.");
+        return View(model);
+    }
+
+    // Save registration data (excluding IFormFile) with photo path
+    var registrationData = new RegistrationData
+    {
+        FullName = model.FullName,
+        CreditCardNo = model.CreditCardNo,
+        Gender = model.Gender,
+        MobileNo = model.MobileNo,
+        DeliveryAddress = model.DeliveryAddress,
+        Email = model.Email,
+        Password = model.Password,
+        AboutMe = model.AboutMe,
+        PhotoPath = photoPath
+    };
+
+    TempData["RegistrationData"] = JsonConvert.SerializeObject(registrationData);
+
+    var otp = new Random().Next(100000, 1000000).ToString();
+    HttpContext.Session.SetString("RegistrationOTP", otp);
+    Console.WriteLine($"OTP: {otp}");
+    Console.WriteLine($"Email: {model.Email}");
+    try
+    {
+        await _emailService.SendEmailAsync(
+            model.Email,
+            "Account Verification",
+            $"Hello,<br/><br/>Your verification code is: <strong>{otp}</strong>"
+        );
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine(ex.Message);
+        ModelState.AddModelError("", "Failed to send verification email. Please try again.");
+        return View(model);
+    }
+
+    return RedirectToAction("VerifyOTP");
+}
+
+        // GET: /Registration/VerifyOTP  
+        // Display a view (VerifyOTP.cshtml) with a field for the user to enter the OTP.
+        public IActionResult VerifyOTP()
+        {
+            return View();
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> VerifyOTP(string otp)
+        {
+            string sessionOtp = HttpContext.Session.GetString("RegistrationOTP");
+
+            if (string.IsNullOrEmpty(sessionOtp) || sessionOtp != otp)
             {
-                // Return validation errors.
-                return View(model);
+                ModelState.AddModelError("", "Invalid OTP.");
+                return View();
             }
 
-            // Example server-side captcha check.
-            if (!IsCaptchaValid(model.Captcha))
+            if (TempData["RegistrationData"] == null)
             {
-                ModelState.AddModelError("Captcha", "Invalid captcha response.");
-                return View(model);
+                ModelState.AddModelError("", "Registration details have expired, please register again.");
+                return RedirectToAction("Register");
             }
 
-            // Encrypt credit card number.
-            string encryptedCC = EncryptionService.Encrypt(model.CreditCardNo);
+            var jsonData = TempData["RegistrationData"].ToString();
+            var registrationData = JsonConvert.DeserializeObject<RegistrationData>(jsonData);
 
-            // Create a new User entity.
+            string encryptedCC = _encryptionService.Encrypt(registrationData.CreditCardNo);
+            string passwordHash = _encryptionService.HashPassword(registrationData.Password, out string salt);
+
             var newUser = new User
             {
-                FullName = model.FullName,
+                FullName = registrationData.FullName,
                 EncryptedCreditCardNo = encryptedCC,
-                Gender = model.Gender,
-                MobileNo = model.MobileNo,
-                DeliveryAddress = model.DeliveryAddress,
-                Email = model.Email,
-                // In production, use a proper password hashing algorithm.
-                PasswordHash = EncryptionService.Encrypt(model.Password),
-                AboutMe = model.AboutMe,
+                Gender = registrationData.Gender,
+                MobileNo = registrationData.MobileNo,
+                DeliveryAddress = registrationData.DeliveryAddress,
+                Email = registrationData.Email,
+                PasswordHash = passwordHash,
+                Salt = salt,
+                PhotoPath = registrationData.PhotoPath,
+                AboutMe = registrationData.AboutMe,
                 CreatedDate = DateTime.UtcNow
             };
 
-            // Process the photo upload (only JPG allowed).
-            if (model.Photo != null && model.Photo.ContentType.ToLower() == "image/jpeg")
-            {
-                // Ensure wwwroot/images folder exists.
-                string imagesPath = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "images");
-                if (!Directory.Exists(imagesPath))
-                {
-                    Directory.CreateDirectory(imagesPath);
-                }
-                string fileName = Path.GetFileName(model.Photo.FileName);
-                string filePath = Path.Combine(imagesPath, fileName);
-                using (var stream = new FileStream(filePath, FileMode.Create))
-                {
-                    model.Photo.CopyTo(stream);
-                }
-                newUser.PhotoPath = "/images/" + fileName;
-            }
-            else
-            {
-                ModelState.AddModelError("Photo", "Invalid photo format. Only JPG allowed.");
-                return View(model);
-            }
-
-            // Additional server-side validations (e.g., uniqueness of email) can be added here.
-            // For this example, try to add user to DB.
-            try
-            {
-                // Optionally check if email already exists.
-                if (_dbContext.Users.Any(u => u.Email == newUser.Email))
-                {
-                    ModelState.AddModelError("Email", "Email already exists.");
-                    return View(model);
-                }
-
+            // try
+            // {
                 _dbContext.Users.Add(newUser);
-                _dbContext.SaveChanges();
-            }
-            catch (Exception ex)
-            {
-                // Log exception and display a friendly error message.
-                ModelState.AddModelError("", "An error occurred while processing your registration. Please try again later.");
-                return View(model);
-            }
+                await _dbContext.SaveChangesAsync();
+            // }
+            // catch (Exception ex)
+            // {
+            //     Console.WriteLine(ex.Message);
+            //     ModelState.AddModelError("", "An error occurred during registration. Please try again.");
+            //     return View();
+            // }
 
-            // Redirect to the Login view upon successful registration.
-            return RedirectToAction("Login");
+            HttpContext.Session.Remove("RegistrationOTP");
+            return RedirectToAction("Login", "Registration");
         }
+        
 
         // GET: /login (via custom route)
         public IActionResult Login()
@@ -110,21 +193,232 @@ namespace Assignment2.Controllers
             return View();
         }
 
-        // POST: /login (for demonstration only)
+        [HttpPost]
+[ValidateAntiForgeryToken]
+public async Task<IActionResult> Login(string email, string password)
+{
+    if (string.IsNullOrEmpty(email) || string.IsNullOrEmpty(password))
+    {
+        ModelState.AddModelError("", "Email and password are required.");
+        return View();
+    }
+
+    var user = await _dbContext.Users.FirstOrDefaultAsync(u => u.Email == email);
+    if (user == null)
+    {
+        ModelState.AddModelError("", "Invalid credentials.");
+        return View();
+    }
+
+    // Check account lockout
+    if (user.LockoutEnd.HasValue && user.LockoutEnd > DateTime.UtcNow)
+    {
+        ModelState.AddModelError("", $"Account locked until {user.LockoutEnd.Value.ToLocalTime()}.");
+        return View();
+    }
+
+    // Verify password
+    bool isValid = _encryptionService.VerifyPassword(password, user.PasswordHash, user.Salt);
+    if (!isValid)
+    {
+        user.FailedLoginAttempts++;
+        if (user.FailedLoginAttempts >= 5)
+        {
+            user.LockoutEnd = DateTime.UtcNow.AddMinutes(30);
+        }
+        await _dbContext.SaveChangesAsync();
+        ModelState.AddModelError("", "Invalid credentials.");
+        return View();
+    }
+
+    // Check existing sessions
+    var sessionId = HttpContext.Session.Id;
+    var existingSessionId = await _redisService.GetAsync($"session:{user.Id}");
+    if (!string.IsNullOrEmpty(existingSessionId) && existingSessionId != sessionId)
+    {
+        ModelState.AddModelError("", "You are already logged in from another device.");
+        return View();
+    }
+
+    // Create claims
+    var claims = new List<Claim>
+    {
+        new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+        new Claim(ClaimTypes.Email, user.Email)
+    };
+
+    var claimsIdentity = new ClaimsIdentity(
+        claims, 
+        CookieAuthenticationDefaults.AuthenticationScheme);
+
+    await HttpContext.SignInAsync(
+        CookieAuthenticationDefaults.AuthenticationScheme,
+        new ClaimsPrincipal(claimsIdentity),
+        new AuthenticationProperties
+        {
+            IsPersistent = false,
+            ExpiresUtc = DateTime.UtcNow.AddMinutes(30),
+            AllowRefresh = true
+        });
+    HttpContext.User = new ClaimsPrincipal(claimsIdentity);
+
+    Console.WriteLine($"User authenticated: {User.Identity.IsAuthenticated}");
+    Console.WriteLine($"Claims after sign-in: {string.Join(", ", User.Claims.Select(c => $"{c.Type}: {c.Value}"))}");
+    // Update user state
+    user.FailedLoginAttempts = 0;
+    user.LockoutEnd = null;
+    var newSessionId = HttpContext.Session.Id;
+    Console.WriteLine($"New session ID: {newSessionId}");
+    await _redisService.SetAsync($"session:{user.Id}", newSessionId);
+    HttpContext.Session.SetString("SessionId", newSessionId); // Store in ASP.NET Core session    
+    Console.WriteLine(_redisService.GetAsync($"session:{user.Id}"));
+    Console.WriteLine($"Session ID stored in Redis for user {user.Id}: {newSessionId}");
+    // Audit log
+    _dbContext.AuditLogs.Add(new AuditLog
+    {
+        UserId = user.Id.ToString(),
+        Action = "Login",
+        Timestamp = DateTime.UtcNow,
+        Details = "Successful login."
+    });
+
+    await _dbContext.SaveChangesAsync();
+
+    return RedirectToAction("Index", "Home");
+}
+        public class RecaptchaResponse
+        {
+            [JsonProperty("success")]
+            public bool Success { get; set; }
+    
+            [JsonProperty("score")]
+            public float Score { get; set; }
+        }
+        private async Task<bool> IsCaptchaValid(string captchaResponse)
+        {
+            var secret = _configuration["GoogleRecaptcha:SecretKey"];
+            using var client = new HttpClient();
+            var content = new FormUrlEncodedContent(new[]
+            {
+                new KeyValuePair<string, string>("secret", secret),
+                new KeyValuePair<string, string>("response", captchaResponse)
+            });
+    
+            var response = await client.PostAsync("https://www.google.com/recaptcha/api/siteverify", content);
+            var responseString = await response.Content.ReadAsStringAsync();
+            Console.WriteLine(responseString);
+    
+            var result = JsonConvert.DeserializeObject<RecaptchaResponse>(responseString);
+            return result.Success && result.Score >= 0.5; // Adjust score threshold as needed
+        }
+
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public IActionResult Login(string Email, string Password)
+        public async Task<IActionResult> Logout()
         {
-            // Authenticate user (example only; replace with proper logic).
-            // In this demo, we simply return the login view.
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+    
+            await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+            await _redisService.DeleteAsync($"session:{userId}");
+    
+            return RedirectToAction("Login", "Registration");
+        }
+        
+        public IActionResult ForgotPassword()
+        {
             return View();
         }
 
-        // Pseudo-code for captcha validation.
-        private bool IsCaptchaValid(string captchaResponse)
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ForgotPassword(string email)
         {
-            // Replace with real captcha validation (e.g., via external API or session-based).
-            return true;
+            var user = await _dbContext.Users.FirstOrDefaultAsync(u => u.Email == email);
+            if (user == null)
+            {
+                ModelState.AddModelError("", "No account found with this email.");
+                return View();
+            }
+
+            // Generate a password reset token
+            var token = Guid.NewGuid().ToString();
+            user.ResetToken = token;
+            user.ResetTokenExpiry = DateTime.UtcNow.AddHours(1);
+            await _dbContext.SaveChangesAsync();
+
+            // Send reset link via email
+            var resetLink = Url.Action("ResetPassword", "Registration", new { token }, Request.Scheme);
+            Console.WriteLine(resetLink);
+            await _emailService.SendEmailAsync(
+                user.Email,
+                "Password Reset",
+                $"Click <a href='{resetLink}'>here</a> to reset your password."
+            );
+
+            return RedirectToAction("ForgotPasswordConfirmation");
+        }
+
+        public IActionResult ForgotPasswordConfirmation()
+        {
+            return View();
+        }
+        
+        [HttpGet]
+        public IActionResult ResetPassword(string token)
+        {
+            if (string.IsNullOrEmpty(token))
+            {
+                return RedirectToAction("Error", "Home");
+            }
+            return View(new ResetPasswordViewModel { Token = token });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ResetPassword(ResetPasswordViewModel model)
+        {
+            Console.WriteLine(ModelState);
+            if (!ModelState.IsValid)
+            {
+                Console.WriteLine(("invalid model"));
+                return View(model);
+            }
+
+            var user = await _dbContext.Users
+                .FirstOrDefaultAsync(u => 
+                    u.ResetToken == model.Token && 
+                    u.ResetTokenExpiry > DateTime.UtcNow);
+            Console.WriteLine("User found: ${user}");
+            if (user == null)
+            {
+                Console.WriteLine("invalid or expired token ???");
+                ModelState.AddModelError("", "Invalid or expired token.");
+                return View();
+            }
+
+            // Update password
+            user.PasswordHash = _encryptionService.HashPassword(model.NewPassword, out string salt);
+            user.Salt = salt;
+            user.ResetToken = null;
+            user.ResetTokenExpiry = null;
+
+            try
+            {
+                await _dbContext.SaveChangesAsync();
+            }
+            catch (DbUpdateException ex)
+            {
+                Console.WriteLine($"Error resetting password: {ex.Message}");
+                ModelState.AddModelError("", "Error resetting password.");
+                return View(model);
+            }
+
+            return RedirectToAction("ResetPasswordConfirmation");
+        }
+
+        public IActionResult ResetPasswordConfirmation()
+        {
+            return View();
         }
     }
 }

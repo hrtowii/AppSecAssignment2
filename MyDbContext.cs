@@ -22,6 +22,7 @@ namespace Assignment2
 
         // DbSet properties for each model.
         public DbSet<User> Users { get; set; }
+        public DbSet<AuditLog> AuditLogs { get; set; }
         // If you add other models later (e.g., Registration entries, etc.), add here.
         // For example, if you had separate entities for registrations, add them. 
         // In our case, our Registration uses the RegistrationViewModel for input then creates a User.
