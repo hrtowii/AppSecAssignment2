@@ -194,7 +194,7 @@ public async Task<IActionResult> Register(RegistrationViewModel model)
         }
 
         [HttpPost]
-[ValidateAntiForgeryToken]
+        [ValidateAntiForgeryToken]
 public async Task<IActionResult> Login(string email, string password)
 {
     if (string.IsNullOrEmpty(email) || string.IsNullOrEmpty(password))
@@ -232,13 +232,14 @@ public async Task<IActionResult> Login(string email, string password)
     }
 
     // Check existing sessions
-    var sessionId = HttpContext.Session.Id;
-    var existingSessionId = await _redisService.GetAsync($"session:{user.Id}");
-    if (!string.IsNullOrEmpty(existingSessionId) && existingSessionId != sessionId)
-    {
-        ModelState.AddModelError("", "You are already logged in from another device.");
-        return View();
-    }
+    // var sessionId = HttpContext.Session.Id;
+    // var existingSessionId = await _redisService.GetAsync($"session:{user.Id}");
+    // await _redisService.DeleteAsync($"session:{user.Id}");
+    // if (!string.IsNullOrEmpty(existingSessionId) && existingSessionId != sessionId)
+    // {
+    //     ModelState.AddModelError("", "You are already logged in from another device.");
+    //     return View();
+    // }
 
     // Create claims
     var claims = new List<Claim>

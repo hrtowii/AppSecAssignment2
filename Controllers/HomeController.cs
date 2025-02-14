@@ -28,8 +28,7 @@ public class HomeController : Controller
         Console.WriteLine($"User ID from claim: {userId}");
         if (string.IsNullOrEmpty(userId))
         {
-            // return RedirectToAction("Login", "Registration");
-            userId = "2";
+            return RedirectToAction("Login", "Registration");
         }
         var user = await _dbContext.Users
             .FirstOrDefaultAsync(u => u.Id == int.Parse(userId));
